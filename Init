@@ -1,0 +1,2332 @@
+Window.ToggleAnime(false)
+Window:SwitchTab(MainTab)
+LoadTime = math.floor((tick() - LoadTime) * 1000)
+Window.SendNotification("Normal", ("[EH] Exchange.hook v1.3.0 loaded in %dms"):format(LoadTime), 4)
+Window.SendNotification("Normal", "Press RightShift to toggle menu", 10)
+
+_frOrigReloadTimes  = {}
+_frOrigReloadAttrs  = {}
+_frRemovedAnims     = {}
+_frEquipConn        = nil
+
+_frApplyToTemplate = function(toolName)
+    local wf = ReplicatedStorage:FindFirstChild("RangedWeapons")
+    if not wf then return end
+    local tpl = wf:FindFirstChild(toolName)
+    if not tpl then return end
+
+    for _, obj in ipairs(tpl:GetDescendants()) do
+        if obj:IsA("Animation") and obj.Name:lower():find("reload") then
+            _frRemovedAnims[#_frRemovedAnims+1] = {anim=obj, parent=obj.Parent}
+            obj.Parent = nil
+        end
+    end
+
+    local rt = tpl:FindFirstChild("ReloadTime")
+    if rt and (rt:IsA("NumberValue") or rt:IsA("IntValue")) then
+        if _frOrigReloadTimes[toolName] == nil then
+            _frOrigReloadTimes[toolName] = rt.Value
+        end
+        rt.Value = 0.01
+    end
+
+    local rta = tpl:GetAttribute("ReloadTime")
+    if rta ~= nil then
+        if _frOrigReloadAttrs[toolName] == nil then
+            _frOrigReloadAttrs[toolName] = rta
+        end
+        tpl:SetAttribute("ReloadTime", 0.01)
+    end
+end
+
+_frApplyAll = function()
+    local wf = ReplicatedStorage:FindFirstChild("RangedWeapons")
+    if not wf then return end
+    for _, tpl in ipairs(wf:GetChildren()) do
+        _frApplyToTemplate(tpl.Name)
+    end
+end
+
+_frRestore = function()
+
+    for _, entry in ipairs(_frRemovedAnims) do
+        pcall(function()
+            if entry.anim and entry.parent then
+                entry.anim.Parent = entry.parent
+            end
+        end)
+    end
+    _frRemovedAnims = {}
+
+    local wf = ReplicatedStorage:FindFirstChild("RangedWeapons")
+    if wf then
+        for toolName, origVal in pairs(_frOrigReloadTimes) do
+            local tpl = wf:FindFirstChild(toolName)
+            if tpl then
+                local rt = tpl:FindFirstChild("ReloadTime")
+                if rt then rt.Value = origVal end
+            end
+        end
+        for toolName, origAttr in pairs(_frOrigReloadAttrs) do
+            local tpl = wf:FindFirstChild(toolName)
+            if tpl then
+                tpl:SetAttribute("ReloadTime", origAttr)
+            end
+        end
+    end
+    _frOrigReloadTimes = {}
+    _frOrigReloadAttrs = {}
+
+    if _frEquipConn then _frEquipConn:Disconnect(); _frEquipConn = nil end
+end
+
+_frEnable = function()
+
+    task.spawn(_frApplyAll)
+
+    local char = player.Character or player.CharacterAdded:Wait()
+    _frEquipConn = char.ChildAdded:Connect(function(child)
+        if not BrzS.fastReload then return end
+        if child:IsA("Tool") then
+            task.defer(function() _frApplyToTemplate(child.Name) end)
+        end
+    end)
+end
+
+HIT_SOUNDS = {
+    Default      = "Default",
+    Rust         = "rbxassetid://1255040462",
+    Gamesense    = "rbxassetid://4817809188",
+    Neverlose    = "rbxassetid://8726881116",
+    Bubble       = "rbxassetid://198598793",
+    Ding         = "rbxassetid://2868331684",
+    Bruh         = "rbxassetid://4275842574",
+    ["Windows XP"] = "rbxassetid://130840811",
+    Discord      = "rbxassetid://6501486918",
+    TeamFortress = "rbxassetid://296102734",
+    ["CS 1.6"]   = "rbxassetid://18362692980",
+    Toilet       = "rbxassetid://8430024127",
+    FAAHH        = "rbxassetid://72298953503422",
+}
+HIT_SOUND_NAMES = {"Default","Rust","Gamesense","Neverlose","Bubble","Ding","Bruh","Windows XP","Discord","TeamFortress","CS 1.6","Toilet","FAAHH"}
+ORIG_HIT_IDS = {
+    "rbxassetid://4585382589","rbxassetid://4585351098",
+    "rbxassetid://4585382046","rbxassetid://4585364605",
+}
+
+_hookGuiHitSounds = function(gui)
+    if not gui then return end
+    gui.DescendantAdded:Connect(function(obj)
+        if not BrzS.hitSoundEnabled then return end
+        if obj:IsA("Sound") and BrzS.hitSoundId ~= "Default" then
+            local wantId = HIT_SOUNDS[BrzS.hitSoundId] or BrzS.hitSoundId
+            obj.SoundId = wantId
+            obj.Volume  = BrzS.hitSoundVolume
+        end
+    end)
+end
+
+_hitHookSetUp = false
+_hookHitSounds = function()
+    if _hitHookSetUp then return end
+    _hitHookSetUp = true
+    local mg = player.PlayerGui:FindFirstChild("MainGui")
+    if mg then _hookGuiHitSounds(mg) end
+    player.PlayerGui.ChildAdded:Connect(function(child)
+        if child.Name == "MainGui" and BrzS.hitSoundEnabled then
+            _hookGuiHitSounds(child)
+        end
+    end)
+end
+
+_playHitSoundTest = function()
+    local id = HIT_SOUNDS[BrzS.hitSoundId] or BrzS.hitSoundId
+    local s = Instance.new("Sound")
+    s.SoundId = (id == "Default") and "rbxassetid://4585351098" or id
+    s.Volume  = BrzS.hitSoundVolume
+    s.Parent  = workspace
+    s:Play()
+    game:GetService("Debris"):AddItem(s, 3)
+end
+
+local function enableAntiAFK()
+    if _afkConn then _afkConn:Disconnect(); _afkConn = nil end
+    local VirtualUser = game:GetService("VirtualUser")
+    _afkConn = game:GetService("Players").LocalPlayer.Idled:Connect(function()
+        VirtualUser:Button2Down(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+        task.wait(0.1)
+        VirtualUser:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+    end)
+end
+local function disableAntiAFK()
+    if _afkConn then _afkConn:Disconnect(); _afkConn = nil end
+end
+enableAntiAFK()
+
+PAID_ONLY_FLAGS = {
+    "WepFastBullet",
+    "WepNoSway",
+    "WepUnlockFiremodes",
+    "WepRPMBoost",
+    "SilentAim",
+    "SilentPlayers",
+    "SilentAI",
+    "SilentRandPart",
+    "SilentNearPart",
+    "SilentPredict",
+    "NoJumpTilt",
+    "WaterBypass",
+    "NoBulletDrop",
+    "UndergroundEnabled",
+    "WldNoGrass",
+    "BulletTracers",
+}
+
+applyExecutorGating = function()
+    if _G.EH_PAID_EXECUTOR then return end
+    -- bright amber so it's legible on any dark background
+    local LOCKED_COLOR  = Color3.fromRGB(252, 180, 30)
+    local LOCK_SUFFIX   = " ★ paid"
+
+    for _, flag in ipairs(PAID_ONLY_FLAGS) do
+        local toggle = Library._toggles and Library._toggles[flag]
+        if toggle then
+            if toggle.Toggled then toggle:Set(false) end
+
+            if toggle._titleDrawing then
+                local cur = toggle._titleDrawing.Text
+                -- strip any old suffix before appending, avoid doubling up
+                cur = cur:gsub(" %★ paid$", ""):gsub(" %[paid%]$", "")
+                toggle._titleDrawing.Text  = cur .. LOCK_SUFFIX
+                toggle._titleDrawing.Color = LOCKED_COLOR
+            end
+            if toggle._outlineDrawing then
+                toggle._outlineDrawing.Color = LOCKED_COLOR
+            end
+
+            if Library._clickables and toggle._clickEntry then
+                for i = #Library._clickables, 1, -1 do
+                    if Library._clickables[i] == toggle._clickEntry then
+                        table.remove(Library._clickables, i)
+                        break
+                    end
+                end
+            end
+        end
+        Library.Flags[flag] = false
+    end
+end
+
+task.defer(applyExecutorGating)
+
+local _syncTimer = 0
+RunService.Heartbeat:Connect(function(dt)
+    _syncTimer = _syncTimer + dt
+    if _syncTimer < 0.05 then return end
+    _syncTimer = 0
+    local F = Library.Flags
+
+    if not _G.EH_PAID_EXECUTOR then
+        for _, flag in ipairs(PAID_ONLY_FLAGS) do
+            F[flag] = false
+        end
+    end
+
+    espS.enabled        = F["ESPEnabled"]    or false
+    espS.showName       = F["ESPNames"]      or false
+    espS.showDistance   = F["ESPDist"]       or false
+    espS.showHealth     = F["ESPHealth"]     or false
+    espS.showWeapon     = F["ESPWeapon"]     or false
+    espS.npcESP         = F["ESPNpc"]        or false
+    espS.teamCheck      = F["ESPTeam"]       or false
+    espVisCheck         = F["ESPVisCheck"]   or false
+    espS.renderDistance = F["ESPRenderDist"] or 1000
+    espS.fontSize       = F["ESPFontSize"]   or 13
+    espS.showSkeleton   = F["ESPSkeleton"]   or false
+    espS.showTracers    = F["ESPTracers"]    or false
+    espS.chams          = F["ESPChams"]      or false
+    espS.chamsTransparency = (F["ESPChamsTransp"] or 5) / 10
+    espS.boxThickness   = (F["ESPBoxThick"] or 3) / 2
+    espS.skeletonThickness = (F["ESPSkelThick"] or 2) / 2
+    espS.tracerThickness = (F["ESPTracThick"] or 2) / 2
+    espS.tracerTransparency = (F["ESPTracTransp"] or 3) / 10
+    espS.healthBarWidth = F["ESPHealthWidth"] or 4
+
+    if F["ESPBoxColor"]    then espS.boxColor      = F["ESPBoxColor"]    end
+    if F["ESPNameColor"]   then espS.nameColor     = F["ESPNameColor"]   end
+    if F["ESPSkelColor"]   then espS.skeletonColor = F["ESPSkelColor"]   end
+    if F["ESPTracColor"]   then espS.tracerColor   = F["ESPTracColor"]   end
+    if F["ESPChamsFill"]   then espS.chamsFill     = F["ESPChamsFill"]   end
+    if F["ESPChamsOut"]    then espS.chamsOutline  = F["ESPChamsOut"]    end
+    if F["HitMarkerCol"]   then BrzS.hitMarkerColor = F["HitMarkerCol"]  end
+
+    local boxModes = {"Corner","2D","3D","None"}
+    espS.boxMode = boxModes[F["ESPBoxMode"] or 1] or "Corner"
+
+    -- dropdown returns string directly, not an index
+    espS.healthPos = (F["ESPHealthPos"] ~= nil and type(F["ESPHealthPos"]) == "string") and F["ESPHealthPos"] or "Left"
+    local hpGrads = {"GreenRed","RedGreen","StaticGreen","StaticRed"}
+    espS.healthGradient = hpGrads[F["ESPHealthGrad"] or 1] or "GreenRed"
+
+    local tracOrigins = {"Bottom","Center","Top","Mouse"}
+    espS.tracerOrigin = tracOrigins[F["ESPTracOrigin"] or 1] or "Bottom"
+
+    BrzS.hitMarker    = F["HitMarker"]     or false
+    BrzS.hitMarkerFade = (F["HitMarkerFade"] or 4) / 2
+
+    AimS.enabled    = F["AimEnabled"]  or false
+    AimS.pred       = F["AimPred"]     or false
+    AimS.stickyAim  = F["AimSticky"]   or false
+    AimS.visibleOnly = F["AimVisible"] or false
+    AimS.teamCheck  = F["AimTeam"]     or false
+    AimS.FOV        = F["AimFOV"]      or 35
+    AimS.dist       = F["AimDist"]     or 5000
+    AimS.predTime   = (F["AimPredTime"] or 12) / 100
+    AimS.smooth     = (F["AimSmooth"]  or 15) / 100
+
+    local bones = {"Head","Neck","Torso","Pelvis","LowerTorso"}
+    AimS.bone = bones[F["AimBone"] or 1] or "Head"
+
+    ModS.noSpread  = F["WepNoSpread"]  or false
+    ModS.noRecoil  = F["WepNoRecoil"]  or false
+    -- new weapon mod flags (state just read by feature closures, no BrzS needed)
+    if not _G.EH_PAID_EXECUTOR then
+        F["WepFastBullet"]       = false
+        F["WepNoSway"]           = false
+        F["WepUnlockFiremodes"]  = false
+        F["WepRPMBoost"]         = false
+    end
+    if not _G.EH_PAID_EXECUTOR then F["NoBulletDrop"] = false end
+    BrzS.noBulletDrop = F["NoBulletDrop"]  or false
+    -- instant hit and force hit removed (bannable)
+    BrzS.instantHit   = false
+    BrzS.forceHit     = false
+
+    AimS.saEnabled = (_G.EH_PAID_EXECUTOR and F["SilentAim"]) or false
+    if _G.EH_PAID_EXECUTOR then
+        _SA.silentAimbot  = F["SilentAim"]        or false
+        _SA.enabled       = F["SilentAim"]        or false
+        _SA.perfectSilent = false  -- removed (bannable)
+        _SA.targetPlayers = F["SilentPlayers"]    ~= false
+        _SA.targetAI      = F["SilentAI"]         ~= false
+        _SA.randomizePart = F["SilentRandPart"]   or false
+        _SA.nearestPart   = F["SilentNearPart"]   or false
+        _SA.prediction    = F["SilentPredict"]    or false
+        _SA.autoShoot     = false  -- removed (bannable)
+        _SA.silentChance  = F["SilentHitChance"]  or 100
+        _SA.showFov       = F["SilentShowFov"]     or false
+        _SA.smoothness    = F["SilentSmooth"]     or 1
+        _SA.stickyAim     = AimS.stickyAim
+        _SA.teamCheck     = AimS.teamCheck
+        _SA.visibleOnly   = AimS.visibleOnly
+        _SA.fovSize       = F["SilentFovSz"]      or (AimS.FOV * 8) or 150
+        _SA.actualFov     = _SA.fovSize
+    end
+    AimS.silentHitChance = F["SilentHitChance"] or 100
+
+    ModS.fullbright = F["WldFullbright"] or false
+    ModS.noFog      = F["WldNoFog"]     or false
+    ModS.noGrass    = F["WldNoGrass"]   or false
+    BrzS.noLeaves   = F["WldNoLeaves"]  or false
+    ModS.clockTime  = F["WldClockTime"] or 12
+
+    BrzS.ambientChanger = F["AmbientChanger"]  or false
+    BrzS.ambientRGB     = F["AmbientRGB"]      or false
+    BrzS.ambientRGBSpeed = (F["AmbientRGBSpeed"] or 5) / 10
+    if F["AmbientCol"] then BrzS.ambientColor = F["AmbientCol"] end
+
+    CamS.fovOverride  = F["CamFOVOverride"] or false
+    CamS.fovVal       = F["CamFOV"]         or 70
+    CamS.zoomEnabled  = F["CamZoom"]        or false
+    CamS.zoomFov      = F["CamZoomFOV"]     or 15
+    CamS.tiltEnabled  = F["CamTilt"]        or false
+    CamS.tiltAngle    = F["CamTiltAngle"]   or 15
+
+    local xhairStyles = {"Dot","Cross","Circle Dot"}
+    CamS.crosshairStyle = xhairStyles[F["CamXhairStyle"] or 1] or "Dot"
+
+    BrzS.omniSprint    = F["OmniSprint"]   or false
+    BrzS.thirdPerson   = F["ThirdPerson"]  or false
+    BrzS.thirdPersonDist = F["ThirdPersonDist"] or 20
+    BrzS.thirdPersonMode = F["ThirdPersonMode"] or "shift"
+    BrzS.silentSteps   = F["SilentSteps"]  or false
+    BrzS.bunnyHop      = F["BunnyHop"]     or false
+    BrzS.infJumpPower  = F["BhopPower"]    or 22
+    BrzS.noFallDamage  = F["NoFallDmg"]    or false
+    BrzS.longJump      = F["LongJump"]     or false
+    BrzS.longJumpPower = F["LongJumpPow"]  or 60
+
+    BrzS.noVisor        = F["NoVisor"]      or false
+    BrzS.noInvBlur      = F["NoInvBlur"]    or false
+    BrzS.noRepairBlur   = F["NoRepairBlur"] or false
+
+    -- bullet tracers (free feature)
+    BrzS.bulletTracers     = F["BulletTracers"]  or false
+    BrzS.bulletTracerFade  = (F["BulletTracerFade"] or 5) / 10
+    if F["BulletTracerColor"] and type(F["BulletTracerColor"]) == "string" then
+        pcall(function() BrzS.bulletTracerColor = Color3.fromHex(F["BulletTracerColor"]) end)
+    elseif type(F["BulletTracerColor"]) == "Color3" then -- in case it's already a Color3
+        BrzS.bulletTracerColor = F["BulletTracerColor"]
+    end
+
+    -- anti-aim sync
+    local aaEnabled = F["AAEnabled"] or false
+    if aaEnabled ~= _AA.enabled then _aaEnable(aaEnabled) end
+    _AA.mode      = F["AAMode"]      or "yaw180"
+    _AA.jitterAng = F["AAJitterAng"] or 35
+    _AA.pitchValue= F["AAPitchVal"]  or 89
+    _AA.spinSpeed = F["AASpinSpeed"] or 12
+
+    -- underground resolver (paid)
+    local ugEnabled = (_G.EH_PAID_EXECUTOR and F["UndergroundEnabled"]) or false
+    if ugEnabled ~= _UG.enabled then _ugEnable(ugEnabled) end
+    _UG.depth                = (F["UndergroundDepth"] or 25) / 10
+    BrzS.undergroundEnabled  = ugEnabled
+    BrzS.undergroundDepth    = _UG.depth
+
+    BrzS.instantEquip       = F["InstantEquip"] or false
+
+    BrzS.instantMagRefill = F["InstantMag"] or false
+
+
+    -- NoMines is now a button (detonate on press), no flag sync needed
+    BrzS.droppedItemESP      = F["DroppedESP"]     or false
+    BrzS.corpseESP           = F["CorpseESP"]       or false
+    BrzS.inventoryCheckCorpse = F["InvCheckCorpse"] or false
+    BrzS.modDetector         = F["ModDetector"]     or false
+    BrzS.cheatDetector       = F["CheatDetector"]   or false
+    BrzS._brokerAutoUnhide   = F["BrokerAutoUnhide"] or false
+    BrzS.viewmodelChanger    = F["ViewmodelChanger"] or false
+    BrzS.viewmodelTransp     = (F["ViewmodelTransp"] or 0) / 10
+    BrzS.vmOffsets           = F["VMOffsetsEnabled"] or false
+    BrzS.vmOffsetX           = (F["VMOffX"] or 0) / 100
+    BrzS.vmOffsetY           = (F["VMOffY"] or 0) / 100
+    BrzS.vmOffsetZ           = (F["VMOffZ"] or 0) / 100
+    BrzS.vmRotX              = (F["VMRotX"] or 0) / 100
+    BrzS.vmRotY              = (F["VMRotY"] or 0) / 100
+    BrzS.vmRotZ              = (F["VMRotZ"] or 0) / 100
+    BrzS.lowFoodDetector     = F["LowFoodDetect"]  or false
+    BrzS.lowFoodThreshold    = F["LowFoodThresh"]  or 200
+
+    local hudNow = F["HUDPanel"] or false
+    if hudNow ~= hudEnabled then
+        hudEnabled = hudNow
+        if hudEnabled then
+            hudGui.Enabled = true
+            if not hudElements.panel then
+                local panel = Instance.new("Frame")
+                panel.Name = "EH_HUD_Panel"
+                panel.Size = UDim2.new(0, 220, 0, 72)
+                panel.Position = UDim2.new(0, 10, 0, 10)
+                panel.BackgroundColor3 = Color3.fromRGB(10, 5, 18)
+                panel.BackgroundTransparency = 0.22
+                panel.Active = true
+                panel.Draggable = true
+                panel.BorderSizePixel = 0
+                panel.Parent = hudGui
+                Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 8)
+                local ps = Instance.new("UIStroke", panel)
+                ps.Color = T.Primary; ps.Thickness = 1; ps.Transparency = 0.4
+                local function hudLbl(y)
+                    local l = Instance.new("TextLabel", panel)
+                    l.Size = UDim2.new(1, -8, 0, 16)
+                    l.Position = UDim2.new(0, 4, 0, y)
+                    l.BackgroundTransparency = 1
+                    l.Font = Enum.Font.Gotham
+                    l.TextSize = 10
+                    l.TextColor3 = T.TextDim
+                    l.TextXAlignment = Enum.TextXAlignment.Left
+                    return l
+                end
+                hudElements.fps  = hudLbl(4)
+                hudElements.ping = hudLbl(22)
+                hudElements.keys = hudLbl(40)
+                hudElements.food = hudLbl(58)
+                hudElements.food.TextColor3 = Color3.fromRGB(255, 100, 100)
+                hudElements.panel = panel
+                task.spawn(function()
+                    local fpsN, fpsC = 0, 0
+                    while hudEnabled do
+                        local dt = RunService.Heartbeat:Wait()
+                        fpsN = fpsN + 1; fpsC = fpsC + dt
+                        if fpsC >= 0.5 then
+                            if hudElements.fps  then hudElements.fps.Text  = string.format("FPS: %d", math.floor(fpsN/fpsC)) end
+                            if hudElements.ping then hudElements.ping.Text = string.format("Ping: %dms", math.floor(player:GetNetworkPing()*1000)) end
+                            fpsN = 0; fpsC = 0
+                        end
+                    end
+                end)
+            end
+        else
+            if hudElements.panel then pcall(function() hudElements.panel:Destroy() end) end
+            hudElements = {}
+            if hudGui then hudGui.Enabled = false end
+        end
+    end
+
+    BrzS.showBoss      = F["ShowBoss"]      or false
+    local prevBossMovable = BrzS.bossMovable
+    BrzS.bossMovable   = F["BossMovable"]   or false
+    if BrzS.bossMovable ~= prevBossMovable and bossInfoGui then
+
+        buildBossInfoGui()
+    end
+    BrzS.modDetector   = F["ModDetector"]   or false
+    BrzS.cheatDetector = F["CheatDetector"] or false
+    BrzS.serverInfo    = false
+
+    local prevHitEnabled = BrzS.hitSoundEnabled
+    BrzS.hitSoundEnabled = F["HitSounds"]   or false
+    BrzS.hitSoundVolume  = (F["HitSoundVol"] or 100) / 100
+    local hitSoundNames = {"Default","Rust","Gamesense","Neverlose","Bubble","Ding","Bruh","Windows XP","Discord","TeamFortress","CS 1.6","Toilet","FAAHH"}
+    BrzS.hitSoundId = hitSoundNames[F["HitSoundName"] or 1] or "Default"
+
+    if BrzS.hitSoundEnabled and not prevHitEnabled then
+        task.spawn(_hookHitSounds)
+    end
+
+    if F["NoMuzzle"] ~= nil then
+        pcall(function()
+            local rw = ReplicatedStorage:FindFirstChild("RangedWeapons")
+            if rw then
+                for _, v in pairs(rw:GetChildren()) do
+                    v:SetAttribute("MuzzleEffect", not F["NoMuzzle"])
+                end
+            end
+        end)
+    end
+
+    if F["WepNoSpread"] then
+        local af = ReplicatedStorage:FindFirstChild("AmmoTypes")
+        if af then
+            for _, item in ipairs(af:GetChildren()) do
+                if item:IsA("Folder") then
+                    item:SetAttribute("MinSpread", 0.0001)
+                    item:SetAttribute("MaxSpread", 0.0001)
+                    item:SetAttribute("ProjectileSpread", 0.0001)
+                end
+            end
+        end
+    end
+    if F["WepNoRecoil"] then
+        local af = ReplicatedStorage:FindFirstChild("AmmoTypes")
+        if af then
+            for _, item in ipairs(af:GetChildren()) do
+                if item:IsA("Folder") then
+                    item:SetAttribute("RecoilStrength", 0)
+                end
+            end
+        end
+    end
+
+    BrzS.skinChanger = F["SkinChanger"] or false
+    local skinNames = {"Default","Anton","Dozer","Scav","OccupantSoldier","UNOSoldier"}
+    BrzS.skinName = skinNames[F["SkinName"] or 1] or "Default"
+
+    local newCrosshair = F["CamCrosshair"] or false
+    if newCrosshair ~= CamS.crosshair then
+        CamS.crosshair = newCrosshair
+        if CamS.crosshairGui then
+            pcall(function() CamS.crosshairGui:Destroy() end)
+            CamS.crosshairGui = nil
+        end
+        if newCrosshair then
+            local xhairStyles2 = {"Dot", "Cross", "Circle Dot"}
+            local xhairStyleIdx = F["CamXhairStyle"] or 1
+            local style = xhairStyles2[xhairStyleIdx] or "Dot"
+            local sg = Instance.new("ScreenGui")
+            sg.Name = "EH_Crosshair"
+            sg.ResetOnSpawn = false
+            sg.IgnoreGuiInset = true
+            sg.DisplayOrder = 10000
+            sg.Parent = PlayerGui
+            local offY = 8
+            local pink = Color3.fromRGB(255, 155, 205)
+            if style == "Dot" then
+                local dot = Instance.new("Frame")
+                dot.Size = UDim2.new(0, 4, 0, 4)
+                dot.AnchorPoint = Vector2.new(0.5, 0.5)
+                dot.Position = UDim2.new(0.5, 0, 0.5, offY)
+                dot.BackgroundColor3 = pink
+                dot.BorderSizePixel = 0
+                pcall(function() dot.ZIndex = 10 end)
+                dot.Parent = sg
+                local uic = Instance.new("UICorner"); uic.CornerRadius = UDim.new(0, 2); uic.Parent = dot
+            elseif style == "Cross" then
+                local h = Instance.new("Frame"); h.Size = UDim2.new(0,14,0,2); h.AnchorPoint = Vector2.new(0.5,0.5); h.Position = UDim2.new(0.5,0,0.5,offY); h.BackgroundColor3 = pink; h.BorderSizePixel=0; h.ZIndex=10; h.Parent=sg
+                local v = Instance.new("Frame"); v.Size = UDim2.new(0,2,0,14); v.AnchorPoint = Vector2.new(0.5,0.5); v.Position = UDim2.new(0.5,0,0.5,offY); v.BackgroundColor3 = pink; v.BorderSizePixel=0; v.ZIndex=10; v.Parent=sg
+            end
+            CamS.crosshairGui = sg
+        end
+    end
+
+    if F["InvViewer"] ~= nil then
+        _G.EH_invEnabled = F["InvViewer"] or false
+        invGui.Enabled = _G.EH_invEnabled
+    end
+end)
+
+pcall(function()
+    fovCircle = Drawing.new("Circle")
+    fovCircle.Thickness = 1.5
+    fovCircle.Color = Color3.fromRGB(255, 155, 205)
+    fovCircle.Filled = false
+    fovCircle.Visible = false
+    fovCircle.Transparency = 0.25
+    fovCircle.NumSides = 60
+    fovCircle.Radius = 100
+    fovCircle.Position = Vector2.new(0, 0)
+end)
+
+RunService.Heartbeat:Connect(function(dt)
+
+    _EHT.esp = _EHT.esp + dt
+    if _EHT.esp < 0.033 then return end
+    _EHT.esp = 0
+    local myHRP = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr == player then
+            if espDrawings[plr] then
+                removeESPEntry(espDrawings[plr])
+                espDrawings[plr] = nil
+            end
+        else
+            local isTeammate = espS.teamCheck and plr.Team and plr.Team == player.Team
+
+            if espS.enabled and plr.Character and not isTeammate then
+                if not espDrawings[plr] then
+                    espDrawings[plr] = createESPEntry(espS.boxColor)
+                end
+                drawESPEntry(espDrawings[plr], plr.Character, espS.boxColor, myHRP)
+
+                if espS.chams and plr.Character then
+                    ensureHL(espDrawings[plr], plr.Character, espS.chamsFill, espS.chamsOutline, espS.chamsTransparency)
+                else
+                    removeHL(espDrawings[plr])
+                end
+            else
+                if espDrawings[plr] then
+                    hideESPEntry(espDrawings[plr])
+                    removeHL(espDrawings[plr])
+                end
+            end
+        end
+    end
+
+    if espS.enabled and espS.npcESP then
+        local _az = workspace:FindFirstChild("AiZones")
+        local _liveNpcs = {}
+        for _, zone in ipairs(_az and _az:GetChildren() or {}) do
+            for _, npc in ipairs(zone:GetChildren()) do
+                if table.find(npcNames, npc.Name) then
+                    -- check alive: must have HRP + Humanoid with Health > 0
+                    local hrp = npc:FindFirstChild("HumanoidRootPart")
+                    local hum = npc:FindFirstChildOfClass("Humanoid")
+                    local alive = hrp and hum and hum.Health > 0
+                    if alive then
+                        _liveNpcs[npc] = true
+                        if not npcDrawings[npc] then
+                            npcDrawings[npc] = createESPEntry(espS.npcColor)
+                        end
+                        drawESPEntry(npcDrawings[npc], npc, espS.npcColor, myHRP)
+                    else
+                        -- dead or destroyed — hide and remove from table
+                        if npcDrawings[npc] then
+                            hideESPEntry(npcDrawings[npc])
+                            npcDrawings[npc] = nil
+                        end
+                    end
+                end
+            end
+        end
+        -- clean up any stale entries (NPCs removed from workspace entirely)
+        for npc, d in pairs(npcDrawings) do
+            if not _liveNpcs[npc] then
+                hideESPEntry(d)
+                npcDrawings[npc] = nil
+            end
+        end
+    else
+        for _, d in pairs(npcDrawings) do
+            hideESPEntry(d)
+        end
+    end
+
+    if espS.enabled and espS.npcESP then
+
+        local function findVehiclesInScope()
+            local found = {}
+            for _, vname in ipairs(VEHICLE_NAMES) do
+                local v = workspace:FindFirstChild(vname)
+                if v and v:IsA("Model") then found[v] = vname end
+            end
+            local az = workspace:FindFirstChild("AiZones")
+            if az then
+                for _, zone in ipairs(az:GetChildren()) do
+                    for _, vname in ipairs(VEHICLE_NAMES) do
+                        local v = zone:FindFirstChild(vname)
+                        if v and v:IsA("Model") then found[v] = vname end
+                    end
+                end
+            end
+            return found
+        end
+        local vehiclesNow = findVehiclesInScope()
+        for veh, vname in pairs(vehiclesNow) do
+            if not vehicleDrawings[veh] then
+                vehicleDrawings[veh] = createESPEntry(Color3.fromRGB(255,200,80))
+            end
+
+            local anchor = veh:FindFirstChildOfClass("VehicleSeat")
+                        or veh.PrimaryPart
+                        or veh:FindFirstChildOfClass("BasePart")
+            if anchor then
+
+                local labelName = vname == "MI24V" and "Mi-24V" or "BTR-80"
+                local orig = veh.Name
+                veh.Name = labelName
+                drawESPEntry(vehicleDrawings[veh], veh, Color3.fromRGB(255,200,80), myHRP)
+                veh.Name = orig
+            end
+        end
+
+        for veh, d in pairs(vehicleDrawings) do
+            if not vehiclesNow[veh] then
+                removeESPEntry(d)
+                vehicleDrawings[veh] = nil
+            end
+        end
+    else
+        for _, d in pairs(vehicleDrawings) do hideESPEntry(d) end
+    end
+
+    for plr, d in pairs(espDrawings) do
+        if not plr.Parent or not plr.Character then
+            removeESPEntry(d)
+            espDrawings[plr] = nil
+        end
+    end
+
+    for npc, d in pairs(npcDrawings) do
+        if not npc:IsDescendantOf(workspace) then
+            removeESPEntry(d)
+            npcDrawings[npc] = nil
+        end
+    end
+end)
+
+local function isTargetInFOV(targetPart)
+    if not cam or not targetPart then return false end
+    local sp = cam:WorldToViewportPoint(targetPart.Position)
+    local screenPos = Vector2.new(sp.X, sp.Y)
+    local center = Vector2.new(cam.ViewportSize.X/2, cam.ViewportSize.Y/2)
+    local halfC = math.rad(cam.FieldOfView/2)
+    local halfA = math.rad(AimS.FOV/2)
+    local maxRadius = math.clamp(math.tan(halfA)/math.tan(halfC) * (cam.ViewportSize.Y/2), 5, cam.ViewportSize.Y)
+    return (screenPos - center).Magnitude <= maxRadius
+end
+
+local function getTargetBonePart(target, bone)
+    if not target then return nil end
+    local char = target:IsA("Player") and target.Character or (target:IsA("Model") and target or nil)
+    if not char then return nil end
+    return char:FindFirstChild(bone) or char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
+end
+
+local function getAimbotTarget()
+    if not cam or not player.Character then return nil, nil end
+    local camPos = cam.CFrame.Position
+    local camLook = cam.CFrame.LookVector
+
+    if AimS.stickyAim and AimS._lastTarget then
+        local part = AimS._lastTarget
+
+        if part:IsA("Player") then
+            local char = part.Character
+            if char then
+                local bone = char:FindFirstChild(AimS.bone) or char:FindFirstChild("Head")
+                if bone and isTargetInFOV(bone) then
+                    local hum = char:FindFirstChildOfClass("Humanoid")
+                    if hum and hum.Health > 0 then
+                        return bone, char
+                    end
+                end
+            end
+        elseif part:IsA("BasePart") then
+            if isTargetInFOV(part) then return part, part.Parent end
+        end
+
+        AimS._lastTarget = nil
+    end
+
+    local bestBone, bestChar, bestScore = nil, nil, math.huge
+
+    for _, plr in ipairs(Players:GetPlayers()) do
+        local isTeammate = AimS.teamCheck and plr.Team and plr.Team == player.Team
+        if plr ~= player and plr.Character and not isTeammate then
+            local char = plr.Character
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            if hum and hum.Health <= 0 then continue end
+            local bone = char:FindFirstChild(AimS.bone) or char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
+            if bone then
+                local toTarget = bone.Position - camPos
+                local dist = toTarget.Magnitude
+                if dist <= AimS.dist then
+                    local angle = math.deg(math.acos(math.clamp(camLook:Dot(toTarget.Unit), -1, 1)))
+                    if angle <= AimS.FOV then
+                        if AimS.visibleOnly and not isVisible(bone.Position, char) then
+
+                        else
+                            local score = angle + dist * 0.001
+                            if score < bestScore then
+                                bestScore = score
+                                bestBone = bone
+                                bestChar = char
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if AimS.enabled and AiZones then
+        for _, zone in ipairs(AiZones:GetChildren()) do
+            for _, npc in ipairs(zone:GetChildren()) do
+                if npc:IsA("Model") and npc:FindFirstChildOfClass("Humanoid") then
+                    local hum = npc:FindFirstChildOfClass("Humanoid")
+                    if hum and hum.Health > 0 then
+                        local bone = npc:FindFirstChild(AimS.bone) or npc:FindFirstChild("Head")
+                        if bone then
+                            local toTarget = bone.Position - camPos
+                            local dist = toTarget.Magnitude
+                            if dist <= AimS.dist then
+                                local angle = math.deg(math.acos(math.clamp(camLook:Dot(toTarget.Unit), -1, 1)))
+                                if angle <= AimS.FOV then
+                                    local score = angle + dist * 0.001
+                                    if score < bestScore then
+                                        bestScore = score
+                                        bestBone = bone
+                                        bestChar = npc
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if bestBone then
+        AimS._lastTarget = bestChar
+    end
+
+    return bestBone, bestChar
+end
+
+RunService.RenderStepped:Connect(function()
+    if fovCircle then
+        fovCircle.Visible = AimS.enabled and (Library.Flags["AimShowFov"] or false)
+        if fovCircle.Visible and cam then
+            local vp = cam.ViewportSize
+            fovCircle.Position = Vector2.new(vp.X / 2, vp.Y / 2)
+            local halfC = math.rad(cam.FieldOfView / 2)
+            local halfA = math.rad(AimS.FOV / 2)
+            fovCircle.Radius = math.clamp(math.tan(halfA) / math.tan(halfC) * (vp.Y / 2), 5, vp.Y)
+
+            local target = getAimbotTarget()
+            fovCircle.Color = (AimS.enabled and target) and Color3.fromRGB(120, 255, 160) or Color3.fromRGB(255, 155, 205)
+        end
+    end
+
+    if AimS.enabled and AimS.held and cam then
+        local target, targetChar = getAimbotTarget()
+        if target then
+            local targetPos = target.Position
+            if AimS.pred and targetChar then
+                local root = targetChar:FindFirstChild("HumanoidRootPart") or targetChar:FindFirstChild("Torso")
+                if root and root:IsA("BasePart") then
+                    targetPos = targetPos + (root.AssemblyLinearVelocity or root.Velocity) * AimS.predTime
+                end
+            end
+            cam.CFrame = cam.CFrame:Lerp(CFrame.new(cam.CFrame.Position, targetPos), 1 - AimS.smooth)
+        end
+    end
+end)
+
+UserInputService.InputBegan:Connect(function(inp, gp)
+    if gp then return end
+    if AimS.KC and inp.UserInputType == Enum.UserInputType.Keyboard and inp.KeyCode == AimS.KC then
+        AimS.held = true
+    end
+    if AimS.MB and inp.UserInputType == AimS.MB then
+        AimS.held = true
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(inp, gp)
+    if gp then return end
+    if AimS.KC and inp.UserInputType == Enum.UserInputType.Keyboard and inp.KeyCode == AimS.KC then
+        AimS.held = false
+    end
+    if AimS.MB and inp.UserInputType == AimS.MB then
+        AimS.held = false
+    end
+end)
+
+UserInputService.InputBegan:Connect(function(i, gp)
+    if gp then return end
+    if CamS.zoomEnabled and i.KeyCode == CamS.zoomKey then
+        cam.FieldOfView = CamS.zoomFov
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(i, gp)
+    if gp then return end
+    if CamS.zoomEnabled and i.KeyCode == CamS.zoomKey then
+        cam.FieldOfView = CamS.fovOverride and CamS.fovVal or CamS.origFov
+    end
+end)
+
+RunService.RenderStepped:Connect(function()
+    if CamS.fovOverride and not (CamS.zoomEnabled and UserInputService:IsKeyDown(CamS.zoomKey)) then
+        cam.FieldOfView = CamS.fovVal
+    end
+
+    if CamS.tiltEnabled then
+        local tiltRad = 0
+        if UserInputService:IsKeyDown(Enum.KeyCode.Q) then
+            tiltRad = math.rad(CamS.tiltAngle)
+        elseif UserInputService:IsKeyDown(Enum.KeyCode.E) then
+            tiltRad = -math.rad(CamS.tiltAngle)
+        end
+        if tiltRad ~= 0 then
+            pcall(function()
+                local cf = cam.CFrame
+                cam.CFrame = cf * CFrame.Angles(0, 0, tiltRad)
+            end)
+        end
+    end
+end)
+
+
+local function getViewModel()
+    return cam:FindFirstChild("ViewModel")
+end
+
+RunService.Heartbeat:Connect(function()
+    if not BrzS.omniSprint then return end
+    local char = player.Character
+    if not char then return end
+    local hum = char:FindFirstChild("Humanoid")
+    if hum and hum.WalkSpeed ~= 18.2 then hum.WalkSpeed = 18.2 end
+end)
+
+local function applyNoVisor(enabled)
+    local pg = player.PlayerGui
+    local noInset = pg and pg:FindFirstChild("NoInsetGui")
+    if not noInset then return end
+    local main = noInset:FindFirstChild("MainFrame")
+    if not main then return end
+    local fx = main:FindFirstChild("ScreenEffects")
+    if not fx then return end
+    if enabled then
+        if not BrzS._visorCache then
+            BrzS._visorCache = {
+                Visor     = fx.Visor     and fx.Visor.Visible,
+                Mask      = fx.Mask      and fx.Mask.Visible,
+                HelmetMask= fx.HelmetMask and fx.HelmetMask.Visible,
+                Flashbang = fx.Flashbang  and fx.Flashbang.Visible,
+            }
+        end
+        if fx:FindFirstChild("Visor")      then fx.Visor.Visible      = false end
+        if fx:FindFirstChild("Mask")       then fx.Mask.Visible        = false end
+        if fx:FindFirstChild("HelmetMask") then fx.HelmetMask.Visible  = false end
+        if fx:FindFirstChild("Flashbang")  then fx.Flashbang.Visible   = false end
+    else
+        if BrzS._visorCache then
+            if fx:FindFirstChild("Visor")      then fx.Visor.Visible      = BrzS._visorCache.Visor      end
+            if fx:FindFirstChild("Mask")       then fx.Mask.Visible        = BrzS._visorCache.Mask       end
+            if fx:FindFirstChild("HelmetMask") then fx.HelmetMask.Visible  = BrzS._visorCache.HelmetMask end
+            if fx:FindFirstChild("Flashbang")  then fx.Flashbang.Visible   = BrzS._visorCache.Flashbang  end
+            BrzS._visorCache = nil
+        end
+    end
+end
+
+RunService.Heartbeat:Connect(function()
+    if BrzS.noVisor == _EHT.lastVisor then return end
+    _EHT.lastVisor = BrzS.noVisor
+    pcall(applyNoVisor, BrzS.noVisor)
+end)
+
+cam.ChildAdded:Connect(function(child)
+    if not BrzS.instantEquip then return end
+    if not child:IsA("Model") then return end
+    local hum = child:FindFirstChildWhichIsA("Humanoid")
+    if not hum then return end
+    task.spawn(function()
+        local found = false
+        for _ = 1, 250 do
+            for _, track in ipairs(hum.Animator:GetPlayingAnimationTracks()) do
+                if track.Animation and track.Animation.Name == "Equip" then
+                    track:AdjustSpeed(15)
+                    track.TimePosition = track.Length - 0.01
+                    found = true
+                    break
+                end
+            end
+            if found then break end
+            task.wait(0.001)
+        end
+    end)
+end)
+
+if not BrzS._vmOrigTransp then BrzS._vmOrigTransp = {} end
+
+local function applyViewmodelChanger(vm)
+    if not vm then return end
+    for _, part in ipairs(vm:GetDescendants()) do
+        if part:IsA("BasePart") then
+            pcall(function()
+                if BrzS._vmOrigTransp[part] == nil then
+                    BrzS._vmOrigTransp[part] = part.Transparency
+                end
+                part.Transparency = BrzS.viewmodelTransp
+            end)
+        end
+    end
+end
+
+cam.ChildAdded:Connect(function(child)
+    if child.Name == "ViewModel" and BrzS.viewmodelChanger then
+        task.wait(0.05)
+        applyViewmodelChanger(child)
+    end
+end)
+
+RunService.Heartbeat:Connect(function(dt)
+    if not BrzS.viewmodelChanger then return end
+    _EHT.vm = _EHT.vm + dt
+    if _EHT.vm < 0.2 then return end
+    _EHT.vm = 0
+    local vm = getViewModel()
+    if vm then applyViewmodelChanger(vm) end
+end)
+
+local _vmPrevCF = nil
+
+RunService.RenderStepped:Connect(function()
+    if not BrzS.vmOffsets then
+        _vmPrevCF = nil
+        return
+    end
+    local vm = cam:FindFirstChild("ViewModel")
+    if not vm or not vm.PrimaryPart then return end
+
+    local offsetCF = CFrame.new(BrzS.vmOffsetX, BrzS.vmOffsetY, BrzS.vmOffsetZ)
+        * CFrame.Angles(
+            math.rad(BrzS.vmRotX),
+            math.rad(BrzS.vmRotY),
+            math.rad(BrzS.vmRotZ)
+        )
+
+    local baseCF = cam.CFrame
+    local newCF  = baseCF * offsetCF
+
+    if newCF ~= _vmPrevCF then
+        pcall(function()
+            vm:SetPrimaryPartCFrame(newCF)
+        end)
+        _vmPrevCF = newCF
+    end
+end)
+
+local function applySkin(skinName)
+    if skinName == "Default" then return end
+    local skins = ReplicatedStorage:FindFirstChild("Skins")
+    if not skins then
+
+        skins = ReplicatedStorage:FindFirstChild("WeaponSkins") or ReplicatedStorage:FindFirstChild("ItemSkins")
+    end
+    if not skins then return end
+
+    local vm = getViewModel()
+    if not vm then return end
+
+    local item = vm:FindFirstChild("Item")
+    if not item then
+
+        for _, child in ipairs(vm:GetChildren()) do
+            if child:IsA("Model") or child:IsA("Tool") then
+                item = child
+                break
+            end
+        end
+    end
+    if not item then return end
+
+    local itemName = item.Name
+
+    if itemName == "Item" or itemName == "" then
+        local nameAttr = item:GetAttribute("WeaponId") or item:GetAttribute("ItemName") or item:GetAttribute("Name")
+        if nameAttr then itemName = nameAttr end
+    end
+
+    local skinFolder = nil
+    for _, folder in ipairs(skins:GetChildren()) do
+        if folder.Name == skinName then
+            skinFolder = folder
+            break
+        end
+    end
+    if not skinFolder then return end
+
+    for _, part in ipairs(item:GetDescendants()) do
+        local sa = part:FindFirstChildOfClass("SurfaceAppearance")
+        if sa then sa:Destroy() end
+    end
+
+    local texNode = skinFolder:FindFirstChild(itemName)
+    if texNode then texNode = texNode:FindFirstChild("Textures") or texNode end
+    if not texNode then
+        texNode = skinFolder:FindFirstChild("Textures")
+            or skinFolder:FindFirstChild("Base")
+            or skinFolder
+    end
+
+    local baseTexId = nil
+    if texNode then
+        local baseChild = texNode:FindFirstChild("Base")
+            or texNode:FindFirstChild("Diffuse")
+            or texNode:FindFirstChild("Color")
+        if baseChild then
+            baseTexId = baseChild.Value or nil
+        elseif texNode:IsA("StringValue") then
+            baseTexId = texNode.Value
+        end
+    end
+
+    local appliedCount = 0
+    for _, part in ipairs(item:GetDescendants()) do
+        if part:IsA("BasePart") or part:IsA("MeshPart") or part:IsA("SpecialMesh") then
+            if part.Name ~= "AimPart" then
+                if baseTexId and baseTexId ~= "" then
+                    local newSA = Instance.new("SurfaceAppearance")
+                    newSA.ColorMap = baseTexId
+                    newSA.Parent = part
+                    appliedCount = appliedCount + 1
+                end
+            end
+        end
+    end
+
+    if appliedCount == 0 then
+
+        local skinColor = skinFolder:GetAttribute("Color")
+        if skinColor then
+            for _, part in ipairs(item:GetDescendants()) do
+                if part:IsA("BasePart") and part.Name ~= "AimPart" then
+                    pcall(function() part.Color = skinColor end)
+                end
+            end
+        end
+    end
+end
+
+cam.ChildAdded:Connect(function(child)
+    if child.Name == "ViewModel" and BrzS.skinChanger then
+        task.wait(0.1)
+        pcall(applySkin, BrzS.skinName)
+    end
+end)
+
+player.CharacterAdded:Connect(function(char)
+    task.wait(1)
+end)
+
+local function ensureLowFoodDrawings()
+    if not DRAWING_OK then return end
+    if not BrzS._lowFoodDrawH then
+        BrzS._lowFoodDrawH = Drawing.new("Line")
+        BrzS._lowFoodDrawH.Thickness = 4
+        BrzS._lowFoodDrawH.Color = Color3.fromRGB(255, 60, 60)
+        BrzS._lowFoodDrawH.Transparency = 1
+        BrzS._lowFoodDrawH.Visible = false
+    end
+    if not BrzS._lowFoodDrawW then
+        BrzS._lowFoodDrawW = Drawing.new("Line")
+        BrzS._lowFoodDrawW.Thickness = 4
+        BrzS._lowFoodDrawW.Color = Color3.fromRGB(60, 200, 255)
+        BrzS._lowFoodDrawW.Transparency = 1
+        BrzS._lowFoodDrawW.Visible = false
+    end
+end
+
+RunService.Heartbeat:Connect(function(dt)
+    _EHT.lfd = _EHT.lfd + dt
+    if _EHT.lfd < 0.25 then return end
+    _EHT.lfd = 0
+    if not BrzS.lowFoodDetector then
+        if BrzS._lowFoodDrawH then BrzS._lowFoodDrawH.Visible = false end
+        if BrzS._lowFoodDrawW then BrzS._lowFoodDrawW.Visible = false end
+        return
+    end
+    ensureLowFoodDrawings()
+    local vp = cam and cam.ViewportSize or Vector2.new(1920, 1080)
+    local thr = BrzS.lowFoodThreshold
+    local showH, showW = false, false
+    pcall(function()
+        local mg = player.PlayerGui:FindFirstChild("MainGui")
+        if mg then
+            local vs = mg.MainFrame.BackpackFrame.CharacterFrame.VitalSigns
+            local hunger    = tonumber(vs.Hunger.Number.Text:match("^(.-)/"))
+            local hydration = tonumber(vs.Hydration.Number.Text:match("^(.-)/"))
+            if hunger    and hunger    <= thr then showH = true end
+            if hydration and hydration <= thr then showW = true end
+        end
+    end)
+
+    if BrzS._lowFoodDrawH then
+        BrzS._lowFoodDrawH.Visible = showH
+        BrzS._lowFoodDrawH.From = Vector2.new(0, 2)
+        BrzS._lowFoodDrawH.To   = Vector2.new(vp.X, 2)
+    end
+    if BrzS._lowFoodDrawW then
+        BrzS._lowFoodDrawW.Visible = showW
+        BrzS._lowFoodDrawW.From = Vector2.new(0, 8)
+        BrzS._lowFoodDrawW.To   = Vector2.new(vp.X, 8)
+    end
+end)
+
+local function refreshDroppedESP()
+
+    for _, bb in ipairs(_droppedBillboards) do pcall(function() bb:Destroy() end) end
+    _droppedBillboards = {}
+    if not BrzS.droppedItemESP then return end
+    local dropped = workspace:FindFirstChild("DroppedItems")
+    if not dropped then return end
+    for _, item in ipairs(dropped:GetChildren()) do
+        local part = item:FindFirstChildWhichIsA("BasePart")
+        if part then
+            local bb = Instance.new("BillboardGui")
+            bb.AlwaysOnTop = true
+            bb.LightInfluence = 0
+            bb.Size = UDim2.new(0, 80, 0, 20)
+            bb.StudsOffset = Vector3.new(0, 2, 0)
+            bb.Adornee = part
+            bb.Parent = part
+            local lbl2 = Instance.new("TextLabel", bb)
+            lbl2.Size = UDim2.new(1,0,1,0)
+            lbl2.BackgroundTransparency = 1
+            lbl2.Text = item.Name
+            lbl2.TextColor3 = BrzS.droppedItemColor
+            lbl2.TextSize = BrzS.droppedItemTextSize
+            lbl2.Font = Enum.Font.GothamBold
+            table.insert(_droppedBillboards, bb)
+        end
+    end
+end
+
+task.spawn(function()
+    local dropped = workspace:WaitForChild("DroppedItems", 10)
+    if not dropped then return end
+    dropped.ChildAdded:Connect(function() if BrzS.droppedItemESP then refreshDroppedESP() end end)
+    dropped.ChildRemoved:Connect(function() if BrzS.droppedItemESP then refreshDroppedESP() end end)
+end)
+
+
+-- ─── Corpse ESP ───────────────────────────────────────────────────────────────
+-- Adds BillboardGui labels above corpse models in workspace.DroppedItems
+local _corpseGui = nil   -- pre-built billboard template ref
+local function _makeCorpseBillboard(corpse)
+    if not BrzS.corpseESP then return end
+    if corpse:FindFirstChild("BillboardGui") then return end
+    if not corpse:FindFirstChild("Humanoid") then return end
+    pcall(function()
+        local bb = Instance.new("BillboardGui")
+        bb.Size = UDim2.new(0, 200, 0, 40)
+        bb.AlwaysOnTop = true
+        bb.StudsOffsetWorldSpace = Vector3.new(0, 3, 0)
+        bb.Parent = corpse
+
+        local lbl = Instance.new("TextLabel")
+        lbl.Size = UDim2.new(1, 0, 1, 0)
+        lbl.BackgroundTransparency = 1
+        lbl.Text = corpse.Name .. " | Corpse"
+        lbl.TextColor3 = (corpse.Name == player.Name)
+            and Color3.fromRGB(255, 102, 0) or BrzS.corpseColor
+        lbl.TextSize = BrzS.corpseTextSize
+        lbl.Font = Enum.Font.GothamBold
+        lbl.TextStrokeTransparency = 0.5
+        lbl.Parent = bb
+    end)
+end
+
+local function _removeCorpseLabels()
+    local dropped = workspace:FindFirstChild("DroppedItems")
+    if not dropped then return end
+    for _, corpse in ipairs(dropped:GetChildren()) do
+        if corpse:FindFirstChild("Humanoid") then
+            local bb = corpse:FindFirstChild("BillboardGui")
+            if bb then bb:Destroy() end
+        end
+    end
+end
+
+local function _refreshCorpseESP(enabled)
+    _removeCorpseLabels()
+    if not enabled then return end
+    local dropped = workspace:FindFirstChild("DroppedItems")
+    if not dropped then return end
+    for _, corpse in ipairs(dropped:GetChildren()) do
+        _makeCorpseBillboard(corpse)
+    end
+end
+
+-- hook into DroppedItems.ChildAdded for live corpse detection
+task.spawn(function()
+    local dropped = workspace:WaitForChild("DroppedItems", 10)
+    if not dropped then return end
+    dropped.ChildAdded:Connect(function(child)
+        task.wait(0.05)
+        if BrzS.corpseESP then _makeCorpseBillboard(child) end
+    end)
+    dropped.ChildRemoved:Connect(function(child)
+        -- cleanup when corpse removed
+    end)
+end)
+
+-- ─── Mod Detector + Cheat Detector ──────────────────────────────────────────
+-- Adapted from reference: checks PremiumLevel >= 4 (moderators) and invisible body parts.
+-- CheatDetector: checks KDR + ReportList HSR flags.
+local function _runCheatDetector(p)
+    if p == player then return end
+    if not BrzS.cheatDetector then return end
+    if BrzS._cheaterList[p.Name] then return end
+    pcall(function()
+        local rsPlayer = game.ReplicatedStorage.Players:FindFirstChild(p.Name)
+        if not rsPlayer then return end
+        local status = rsPlayer:FindFirstChild("Status")
+        local journey = status and status:FindFirstChild("Journey")
+        local wipe = journey and journey:FindFirstChild("WipeStatistics")
+        if not wipe then return end
+
+        local deaths = math.max(wipe:GetAttribute("Deaths") or 0, 1)
+        local kills  = wipe:GetAttribute("Kills") or 0
+        local kdr    = math.floor(kills / deaths * 10) / 10
+
+        -- Check ReportList flags
+        local reportEntry = (game.ReplicatedStorage:FindFirstChild("ReportList")
+            and (game.ReplicatedStorage.ReportList:FindFirstChild("MostWanted")
+                 and game.ReplicatedStorage.ReportList.MostWanted:FindFirstChild(p.Name)))
+            or (game.ReplicatedStorage.ReportList:FindFirstChild("Recent")
+                and game.ReplicatedStorage.ReportList.Recent:FindFirstChild(p.Name))
+
+        if reportEntry then
+            local totalFlags = reportEntry:GetAttribute("TotalFlags") or 0
+            local hsr        = reportEntry:GetAttribute("HSR") or 0
+            local age        = reportEntry:GetAttribute("Age") or 999
+            if kills >= 15 and hsr >= 95 then
+                BrzS._cheaterList[p.Name] = true
+                EH_Notify("[CHEAT] " .. p.Name .. " HSR suspect KDR:" .. kdr, 8)
+            end
+            if totalFlags >= 75 and age <= 50 then
+                BrzS._cheaterList[p.Name] = true
+                EH_Notify("[CHEAT] " .. p.Name .. " flags suspect KDR:" .. kdr, 8)
+            end
+        end
+        if kills >= 15 and kdr >= 5 then
+            BrzS._cheaterList[p.Name] = true
+            EH_Notify("[CHEAT] " .. p.Name .. " KDR:" .. kdr, 8)
+        end
+    end)
+end
+
+local function _runModDetector()
+    if not BrzS.modDetector then return end
+    for _, p in ipairs(game.Players:GetPlayers()) do
+        if p == player then continue end
+        _runCheatDetector(p)
+        if not BrzS._modChecked[p.Name] and p.Character then
+            -- Method A: PremiumLevel >= 4
+            pcall(function()
+                local rsP = game.ReplicatedStorage.Players:FindFirstChild(p.Name)
+                local gv = rsP and rsP:FindFirstChild("Status") and rsP.Status:FindFirstChild("GameplayVariables")
+                if gv and (gv:GetAttribute("PremiumLevel") or 0) >= 4 then
+                    if not BrzS._modWarnings[p.Name] then BrzS._modWarnings[p.Name] = 0 end
+                    BrzS._modWarnings[p.Name] = BrzS._modWarnings[p.Name] + 1
+                    EH_Notify("[MOD] " .. p.Name .. " premium admin", 8)
+                end
+            end)
+            -- Method B: invisible body parts (admin invisible hack)
+            if p.Character then
+                pcall(function()
+                    for _, part in pairs(p.Character:GetChildren()) do
+                        if (part.Name == "Head" or part.Name == "UpperTorso" or part.Name == "LowerTorso")
+                           and part:IsA("BasePart") and part.Transparency >= 1 then
+                            if not BrzS._modWarnings[p.Name] then BrzS._modWarnings[p.Name] = 0 end
+                            BrzS._modWarnings[p.Name] = BrzS._modWarnings[p.Name] + 1
+                            EH_Notify("[MOD] " .. p.Name .. " invisible parts", 8)
+                            break
+                        end
+                    end
+                end)
+            end
+            BrzS._modChecked[p.Name] = true
+        end
+    end
+end
+
+-- Run detector loop
+task.spawn(function()
+    while true do
+        task.wait(5)
+        if BrzS.modDetector or BrzS.cheatDetector then
+            _runModDetector()
+        end
+    end
+end)
+
+-- Hook new players joining for immediate cheat check
+game.Players.PlayerAdded:Connect(function(p)
+    task.wait(3)
+    if BrzS.cheatDetector then _runCheatDetector(p) end
+end)
+-- ──────────────────────────────────────────────────────────────────────────────
+
+local bossDefs = {
+    {zone = "Sawmill",  name = "Anton",  attr = nil,           icon = "[User]"},
+    {zone = "Factory",  name = "Dozer",  attr = nil,           icon = "[Vest]"},
+    {zone = "Whisper",  name = "Whisper",attr = "DodgeStamina",icon = "[User]"},
+    {zone = "Death",    name = "Death",  attr = nil,           icon = "[DEAD]"},
+}
+
+local vehicleDefs = {
+    {name = "MI24V",  label = "Mi-24V Hind", icon = "[Heli]"},
+    {name = "BTR80",  label = "BTR-80",       icon = "[Truck]"},
+}
+
+bossInfoLabels = {}; vehicleInfoLabels = {}; bossInfoGui = nil
+
+buildBossInfoGui = function()
+    if bossInfoGui then pcall(function() bossInfoGui:Destroy() end) end
+    bossInfoGui = Instance.new("ScreenGui")
+    bossInfoGui.Name = "EH_BossInfo"
+    bossInfoGui.ResetOnSpawn = false
+    bossInfoGui.DisplayOrder = 9995
+    bossInfoGui.IgnoreGuiInset = true
+    bossInfoGui.Parent = (typeof(gethui)=="function" and gethui()) or game:GetService("CoreGui")
+    bossInfoLabels = {}
+    vehicleInfoLabels = {}
+
+    local ROW_H   = 28
+    local V_ROW_H = 28
+    local HEADER  = 32
+    local SEP_H   = 12
+    local PANEL_W = 260
+    local totalRows = #bossDefs + #vehicleDefs
+    local panelH = HEADER + 6 + (ROW_H * #bossDefs) + SEP_H + 20 + (V_ROW_H * #vehicleDefs) + 12
+
+    local outer = Instance.new("Frame", bossInfoGui)
+    outer.Name = "BossOuter"
+    outer.Size = UDim2.new(0, PANEL_W, 0, panelH)
+    outer.Position = UDim2.new(0, 8, 0.5, -panelH/2)
+    outer.BackgroundColor3 = Color3.fromRGB(0, 0, 5)
+    outer.BorderSizePixel = 0
+    outer.Active = true
+    outer.Draggable = false
+
+    local accent = Instance.new("Frame", outer)
+    accent.Size = UDim2.new(1,-2,1,-2)
+    accent.Position = UDim2.new(0,1,0,1)
+    accent.BackgroundColor3 = Color3.fromRGB(255,155,205)
+    accent.BorderSizePixel = 0
+
+    local frame = Instance.new("Frame", accent)
+    frame.Size = UDim2.new(1,-2,1,-2)
+    frame.Position = UDim2.new(0,1,0,1)
+    frame.BackgroundColor3 = Color3.fromRGB(22,16,32)
+    frame.BorderSizePixel = 0
+
+    local tl = Instance.new("Frame", frame)
+    tl.Size = UDim2.new(1,0,0,1)
+    tl.BackgroundColor3 = Color3.fromRGB(255,155,205)
+    tl.BorderSizePixel = 0
+
+    local headerBar = Instance.new("Frame", frame)
+    headerBar.Name = "DragHandle"
+    headerBar.Size = UDim2.new(1,0,0,HEADER-1)
+    headerBar.Position = UDim2.new(0,0,0,1)
+    headerBar.BackgroundColor3 = Color3.fromRGB(30,22,42)
+    headerBar.BorderSizePixel = 0
+    headerBar.Active = true
+
+    local headerLbl = Instance.new("TextLabel", headerBar)
+    headerLbl.Size = UDim2.new(1,-8,1,0)
+    headerLbl.Position = UDim2.new(0,8,0,0)
+    headerLbl.BackgroundTransparency = 1
+    headerLbl.Text = "[EH]  boss info  .  drag to move"
+    headerLbl.TextColor3 = Color3.fromRGB(232,232,232)
+    headerLbl.Font = Enum.Font.GothamBold
+    headerLbl.TextSize = 11
+    headerLbl.TextXAlignment = Enum.TextXAlignment.Left
+
+    local sep0 = Instance.new("Frame", frame)
+    sep0.Size = UDim2.new(1,-8,0,1)
+    sep0.Position = UDim2.new(0,4,0,HEADER)
+    sep0.BackgroundColor3 = Color3.fromRGB(50,40,65)
+    sep0.BorderSizePixel = 0
+
+    local secBoss = Instance.new("TextLabel", frame)
+    secBoss.Size = UDim2.new(1,-8,0,14)
+    secBoss.Position = UDim2.new(0,6,0,HEADER+4)
+    secBoss.BackgroundTransparency = 1
+    secBoss.Text = "BOSSES"
+    secBoss.TextColor3 = Color3.fromRGB(255,155,205)
+    secBoss.Font = Enum.Font.GothamBold
+    secBoss.TextSize = 9
+    secBoss.TextXAlignment = Enum.TextXAlignment.Left
+
+    local bossY = HEADER + 18
+    for i, def in ipairs(bossDefs) do
+
+        local rowBg = Instance.new("Frame", frame)
+        rowBg.Size = UDim2.new(1,-8,0,ROW_H-3)
+        rowBg.Position = UDim2.new(0,4,0, bossY + (i-1)*ROW_H)
+        rowBg.BackgroundColor3 = Color3.fromRGB(30,22,42)
+        rowBg.BackgroundTransparency = 0.4
+        rowBg.BorderSizePixel = 0
+
+        local stripe = Instance.new("Frame", rowBg)
+        stripe.Size = UDim2.new(0,2,1,0)
+        stripe.BackgroundColor3 = Color3.fromRGB(255,155,205)
+        stripe.BorderSizePixel = 0
+
+        local lbl2 = Instance.new("TextLabel", rowBg)
+        lbl2.Size = UDim2.new(1,-10,1,0)
+        lbl2.Position = UDim2.new(0,8,0,0)
+        lbl2.BackgroundTransparency = 1
+        lbl2.Text = (def.icon or "*") .. "  " .. def.name .. ": checking..."
+        lbl2.TextColor3 = Color3.fromRGB(180,170,195)
+        lbl2.Font = Enum.Font.Gotham
+        lbl2.TextSize = 11
+        lbl2.TextXAlignment = Enum.TextXAlignment.Left
+        bossInfoLabels[i] = lbl2
+    end
+
+    local vehicleY = bossY + #bossDefs * ROW_H + SEP_H
+
+    local sep2 = Instance.new("Frame", frame)
+    sep2.Size = UDim2.new(1,-8,0,1)
+    sep2.Position = UDim2.new(0,4,0, vehicleY - SEP_H/2)
+    sep2.BackgroundColor3 = Color3.fromRGB(50,40,65)
+    sep2.BorderSizePixel = 0
+
+    local secVeh = Instance.new("TextLabel", frame)
+    secVeh.Size = UDim2.new(1,-8,0,14)
+    secVeh.Position = UDim2.new(0,6,0,vehicleY-2)
+    secVeh.BackgroundTransparency = 1
+    secVeh.Text = "VEHICLES"
+    secVeh.TextColor3 = Color3.fromRGB(255,155,205)
+    secVeh.Font = Enum.Font.GothamBold
+    secVeh.TextSize = 9
+    secVeh.TextXAlignment = Enum.TextXAlignment.Left
+
+    for i, vdef in ipairs(vehicleDefs) do
+        local rowBg = Instance.new("Frame", frame)
+        rowBg.Size = UDim2.new(1,-8,0,V_ROW_H-3)
+        rowBg.Position = UDim2.new(0,4,0, vehicleY + 14 + (i-1)*V_ROW_H)
+        rowBg.BackgroundColor3 = Color3.fromRGB(30,22,42)
+        rowBg.BackgroundTransparency = 0.4
+        rowBg.BorderSizePixel = 0
+
+        local stripe2 = Instance.new("Frame", rowBg)
+        stripe2.Size = UDim2.new(0,2,1,0)
+        stripe2.BackgroundColor3 = Color3.fromRGB(255,200,100)
+        stripe2.BorderSizePixel = 0
+
+        local vlbl = Instance.new("TextLabel", rowBg)
+        vlbl.Size = UDim2.new(1,-10,1,0)
+        vlbl.Position = UDim2.new(0,8,0,0)
+        vlbl.BackgroundTransparency = 1
+        vlbl.Text = (vdef.icon or "[Truck]") .. "  " .. vdef.label .. ": checking..."
+        vlbl.TextColor3 = Color3.fromRGB(180,170,195)
+        vlbl.Font = Enum.Font.Gotham
+        vlbl.TextSize = 11
+        vlbl.TextXAlignment = Enum.TextXAlignment.Left
+        vehicleInfoLabels[i] = vlbl
+    end
+
+    do
+        local _bd = {on=false, ox=0, oy=0}
+        local UIS2 = game:GetService("UserInputService")
+        headerBar.InputBegan:Connect(function(inp)
+            if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+                _bd.on = true
+                local ap = outer.AbsolutePosition
+                local mp = UIS2:GetMouseLocation()
+                _bd.ox = mp.X - ap.X
+                _bd.oy = mp.Y - ap.Y
+            end
+        end)
+        UIS2.InputEnded:Connect(function(inp)
+            if inp.UserInputType == Enum.UserInputType.MouseButton1 then _bd.on = false end
+        end)
+        game:GetService("RunService").RenderStepped:Connect(function()
+            if not _bd.on then return end
+            local mp = UIS2:GetMouseLocation()
+            local vp = workspace.CurrentCamera.ViewportSize
+            local sz = outer.AbsoluteSize
+            outer.Position = UDim2.fromOffset(
+                math.clamp(mp.X - _bd.ox, 0, vp.X - sz.X),
+                math.clamp(mp.Y - _bd.oy, 0, vp.Y - sz.Y)
+            )
+        end)
+    end
+end
+
+RunService.Heartbeat:Connect(function(dt)
+    if not BrzS.showBoss then
+        if bossInfoGui then pcall(function() bossInfoGui:Destroy() end); bossInfoGui = nil end
+        return
+    end
+    _EHT.boss = _EHT.boss + dt
+    if _EHT.boss < 0.5 then return end
+    _EHT.boss = 0
+    if not bossInfoGui or not bossInfoGui.Parent then buildBossInfoGui() end
+
+    local aiZones = workspace:FindFirstChild("AiZones")
+
+    for i, def in ipairs(bossDefs) do
+        local lbl2 = bossInfoLabels[i]
+        if not lbl2 then continue end
+        local zone = aiZones and aiZones:FindFirstChild(def.zone)
+        local boss = zone and zone:FindFirstChild(def.name)
+        if boss and boss:IsA("Model") then
+            local hum = boss:FindFirstChild("Humanoid")
+            if hum then
+                local hp, hpMax
+                if def.attr then
+                    local v  = hum:GetAttribute(def.attr) or 0
+                    local mx = hum:GetAttribute("Max"..def.attr) or 1
+                    hp = mx > 0 and math.floor(v/mx*100) or 0
+                    hpMax = 100
+                else
+                    hp    = math.floor(hum.Health)
+                    hpMax = math.floor(hum.MaxHealth)
+                end
+
+                local hrp = boss:FindFirstChild("HumanoidRootPart")
+                local myHRP = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+                local distStr = ""
+                if hrp and myHRP then
+                    distStr = string.format("  %.0fm", (hrp.Position - myHRP.Position).Magnitude / 2.54)
+                end
+                lbl2.Text = string.format("%s  %s: [HP] %d/%d%s", def.icon or "*", def.name, hp, hpMax, distStr)
+                local pct = hpMax > 0 and hp/hpMax or 0
+                lbl2.TextColor3 = pct > 0.5 and Color3.fromRGB(120,255,160)
+                              or  pct > 0.2 and Color3.fromRGB(255,200,60)
+                              or                Color3.fromRGB(255,80,80)
+            else
+                lbl2.Text = (def.icon or "*") .. "  " .. def.name .. ": [SKULL] Dead"
+                lbl2.TextColor3 = Color3.fromRGB(180,60,60)
+            end
+        else
+            lbl2.Text = (def.icon or "*") .. "  " .. def.name .. ": - Not Spawned"
+            lbl2.TextColor3 = Color3.fromRGB(120,120,120)
+        end
+    end
+
+    local function findVehicle(name)
+        local v = workspace:FindFirstChild(name)
+        if v then return v end
+
+        if aiZones then
+            for _, z in ipairs(aiZones:GetChildren()) do
+                local found = z:FindFirstChild(name)
+                if found then return found end
+            end
+        end
+        return nil
+    end
+
+    for i, vdef in ipairs(vehicleDefs) do
+        local vlbl = vehicleInfoLabels[i]
+        if not vlbl then continue end
+        local veh = findVehicle(vdef.name)
+        if veh then
+
+            local seat = veh:FindFirstChildOfClass("VehicleSeat")
+            local hp, hpMax
+            if seat then
+                hp    = math.floor(seat.Health or 0)
+                hpMax = math.floor(seat.MaxHealth or 1)
+            else
+                hp    = tonumber(veh:GetAttribute("Health"))  or -1
+                hpMax = tonumber(veh:GetAttribute("MaxHealth")) or -1
+            end
+
+            local root = veh:FindFirstChild("HumanoidRootPart") or seat
+            local myHRP = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+            local distStr = ""
+            if root and myHRP then
+                distStr = string.format("  %.0fm", (root.Position - myHRP.Position).Magnitude / 2.54)
+            end
+            local hpStr = (hp >= 0 and hpMax > 0) and string.format("[HP] %d/%d", hp, hpMax) or "spawned"
+            vlbl.Text  = string.format("%s  %s: %s%s", vdef.icon, vdef.label, hpStr, distStr)
+            vlbl.TextColor3 = Color3.fromRGB(255,220,100)
+        else
+            vlbl.Text  = vdef.icon .. "  " .. vdef.label .. ": - Not Spawned"
+            vlbl.TextColor3 = Color3.fromRGB(120,120,120)
+        end
+    end
+end)
+
+_modWarnCount = {}; _modChecked = {}
+
+local function _modNotify(name, accountAge, reason)
+    local msg = name .. " | " .. reason .. " | Age:" .. accountAge .. "d"
+    EH_Notify(msg, 10)
+    print("[EH ModDetect] " .. msg)
+end
+
+runModDetector = function()
+    if not BrzS.modDetector then return end
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr == player then continue end
+        if not _modWarnCount[plr.Name] then _modWarnCount[plr.Name] = 0 end
+        if _modWarnCount[plr.Name] >= 5 then continue end
+
+        pcall(function()
+            local rsp    = ReplicatedStorage:FindFirstChild("Players")
+            local rspPlr = rsp and rsp:FindFirstChild(plr.Name)
+            local status = rspPlr and rspPlr:FindFirstChild("Status")
+            local gv     = status and status:FindFirstChild("GameplayVariables")
+            if gv and (gv:GetAttribute("PremiumLevel") or 0) >= 4 then
+                if not BrzS.modWarnings[plr.Name] then
+                    BrzS.modWarnings[plr.Name] = true
+                    _modWarnCount[plr.Name] += 1
+                    _modNotify(plr.Name, plr.AccountAge, "Mod (A) - PremiumLevel >=4")
+                end
+            end
+        end)
+
+        if plr.Character and not _modChecked[plr.Name] then
+            local invisCount, totalCount = 0, 0
+            local BODY = {
+                "Head","UpperTorso","LowerTorso",
+                "LeftUpperArm","LeftLowerArm","LeftHand",
+                "RightUpperArm","RightLowerArm","RightHand",
+                "LeftUpperLeg","LeftLowerLeg","LeftFoot",
+                "RightUpperLeg","RightLowerLeg","RightFoot"
+            }
+            for _, n in ipairs(BODY) do
+                local p = plr.Character:FindFirstChild(n)
+                if p and p:IsA("BasePart") then
+                    totalCount += 1
+                    if p.Transparency >= 0.9 then invisCount += 1 end
+                end
+            end
+            if totalCount > 0 and invisCount == totalCount then
+                if not BrzS.modWarnings[plr.Name] then
+                    BrzS.modWarnings[plr.Name] = true
+                    _modWarnCount[plr.Name] += 1
+                    _modNotify(plr.Name, plr.AccountAge, "Mod (B) - Invisible (" .. invisCount .. "/" .. totalCount .. " parts)")
+                end
+            end
+            _modChecked[plr.Name] = true
+        end
+
+        pcall(function()
+            local rsp    = ReplicatedStorage:FindFirstChild("Players")
+            local rspPlr = rsp and rsp:FindFirstChild(plr.Name)
+            local status = rspPlr and rspPlr:FindFirstChild("Status")
+            if not status then return end
+            local uac  = status:FindFirstChild("UAC")
+            local vars = status:FindFirstChild("GameplayVariables")
+            if uac then
+                for _, flagName in ipairs({"A1Detected","A2Detected","A3Detected"}) do
+                    if uac:GetAttribute(flagName) == true then
+                        if not BrzS.modWarnings[plr.Name] then
+                            BrzS.modWarnings[plr.Name] = true
+                            _modWarnCount[plr.Name] += 1
+                            _modNotify(plr.Name, plr.AccountAge, "Mod (C) - UAC " .. flagName)
+                        end
+                        break
+                    end
+                end
+                if uac:GetAttribute("Enabled") == true then
+                    if not BrzS.modWarnings[plr.Name] then
+                        BrzS.modWarnings[plr.Name] = true
+                        _modWarnCount[plr.Name] += 1
+                        _modNotify(plr.Name, plr.AccountAge, "Mod (C) - UAC Enabled")
+                    end
+                end
+            end
+            if vars and vars:GetAttribute("Godmode") == true then
+                if not BrzS.modWarnings[plr.Name] then
+                    BrzS.modWarnings[plr.Name] = true
+                    _modWarnCount[plr.Name] += 1
+                    _modNotify(plr.Name, plr.AccountAge, "Mod (C) - Godmode active")
+                end
+            end
+        end)
+    end
+end
+
+runCheatDetector = function(plr)
+    if not BrzS.cheatDetector then return end
+    if plr == player then return end
+    if BrzS.cheatWarnings[plr.Name] then return end
+    pcall(function()
+        local rsp      = ReplicatedStorage:FindFirstChild("Players")
+        local rspPlr   = rsp and rsp:FindFirstChild(plr.Name)
+        local status   = rspPlr and rspPlr:FindFirstChild("Status")
+        local journey  = status and status:FindFirstChild("Journey")
+        local wipeStats = journey and journey:FindFirstChild("WipeStatistics")
+        if not wipeStats then return end
+
+        local kills  = wipeStats:GetAttribute("Kills")  or 0
+        local deaths = math.max(wipeStats:GetAttribute("Deaths") or 1, 1)
+        local kdr    = kills / deaths
+
+        local reportList = ReplicatedStorage:FindFirstChild("ReportList")
+        local entry = reportList and (
+            (reportList:FindFirstChild("MostWanted") and reportList.MostWanted:FindFirstChild(plr.Name)) or
+            (reportList:FindFirstChild("Recent")     and reportList.Recent:FindFirstChild(plr.Name))
+        )
+        local totalFlags = entry and (entry:GetAttribute("TotalFlags") or 0) or 0
+        local hsr        = entry and (entry:GetAttribute("HSR")        or 0) or 0
+        local acctAge    = entry and (entry:GetAttribute("Age")        or 999) or 999
+
+        local suspected, reasons = false, {}
+
+        if kills >= 15 and kdr >= 5 then
+            suspected = true
+            table.insert(reasons, "KDR " .. string.format("%.1f", kdr) .. " (A)")
+        end
+
+        if kills >= 15 and hsr >= 95 then
+            suspected = true
+            table.insert(reasons, "HSR " .. hsr .. "% (B)")
+        end
+
+        if totalFlags >= 75 and acctAge <= 50 then
+            suspected = true
+            table.insert(reasons, "Flags " .. totalFlags .. "/age " .. acctAge .. "d (C)")
+        end
+
+        if not suspected then return end
+
+        BrzS.cheatWarnings[plr.Name] = true
+        local hrs     = math.floor((wipeStats:GetAttribute("TimePlayed") or 0) / 3600)
+        local kdrStr  = string.format("%.1f", kdr)
+        local detail  = "K:" .. kills .. " KDR:" .. kdrStr .. " HSR:" .. hsr .. "% Flags:" .. totalFlags
+        if hrs > 0 then detail = detail .. " " .. hrs .. "h" end
+        local reasonStr = table.concat(reasons, " | ")
+        local fullMsg = "[CHEAT?] " .. plr.Name .. " " .. detail .. " - " .. reasonStr
+        EH_Notify(fullMsg, 12)
+        print("[EH CheatDetect] " .. fullMsg)
+    end)
+end
+
+Players.PlayerAdded:Connect(function(plr)
+    runCheatDetector(plr)
+end)
+task.defer(function() for _, plr in ipairs(Players:GetPlayers()) do runCheatDetector(plr) end end)
+
+task.spawn(function()
+    while true do
+        task.wait(10)
+        if BrzS.modDetector then runModDetector() end
+    end
+end)
+
+buildServerInfoGui = function()
+    if BrzS._srvGui then pcall(function() BrzS._srvGui:Destroy() end) end
+    BrzS._srvGui = Instance.new("ScreenGui")
+    BrzS._srvGui.Name = "EH_ServerInfo"
+    BrzS._srvGui.ResetOnSpawn = false
+    BrzS._srvGui.DisplayOrder = 9994
+    BrzS._srvGui.Parent = (typeof(gethui)=="function" and gethui()) or game:GetService("CoreGui")
+    local sif = Instance.new("Frame", BrzS._srvGui)
+    sif.Size = UDim2.new(0, 260, 0, 120)
+    sif.Position = UDim2.new(0, 8, 1, -130)
+    sif.BackgroundColor3 = Color3.fromRGB(14,8,24)
+    sif.BackgroundTransparency = 0.12
+    sif.Active = true
+    sif.Draggable = true
+    Instance.new("UICorner", sif).CornerRadius = UDim.new(0, 8)
+    local stroke2 = Instance.new("UIStroke", sif)
+    stroke2.Color = T.World
+    local function siLbl(text, y)
+        local l = Instance.new("TextLabel", sif)
+        l.Size = UDim2.new(1,-8,0,18)
+        l.Position = UDim2.new(0,4,0,y)
+        l.BackgroundTransparency = 1
+        l.TextColor3 = T.TextDim
+        l.Font = Enum.Font.Gotham
+        l.TextSize = 10
+        l.TextXAlignment = Enum.TextXAlignment.Left
+        l.Text = text
+        return l
+    end
+    BrzS._srvLabels.map     = siLbl("[Map] Map: ...", 4)
+    BrzS._srvLabels.mode    = siLbl("[Fight] Mode: ...", 22)
+    BrzS._srvLabels.players = siLbl("[Team] Players: ...", 40)
+    BrzS._srvLabels.job     = siLbl("[Key] Job: ...", 58)
+    BrzS._srvLabels.place   = siLbl("[Pin] Place: " .. tostring(game.PlaceId), 76)
+    BrzS._srvLabels.ping    = siLbl("[Sig] Ping: ...", 94)
+end
+
+task.spawn(function()
+    while true do
+        task.wait(1)
+        if BrzS.serverInfo and BrzS._srvGui and BrzS._srvGui.Parent then
+
+            local mapId = "Unknown"
+            local mode  = "Unknown"
+            pcall(function()
+
+                for _, name in ipairs({"ServerInfo","GameInfo","GameData","MapInfo"}) do
+                    local node = ReplicatedStorage:FindFirstChild(name)
+                    if node then
+                        mapId = node:GetAttribute("MapId") or node:GetAttribute("Map")
+                            or node:GetAttribute("CurrentMap") or mapId
+                        mode  = node:GetAttribute("GameMode") or node:GetAttribute("Mode")
+                            or node:GetAttribute("CurrentMode") or mode
+                    end
+                end
+
+                local j = ReplicatedStorage:FindFirstChild("Journey") or ReplicatedStorage:FindFirstChild("Session")
+                if j then
+                    mapId = j:GetAttribute("MapId") or j:GetAttribute("Map") or mapId
+                    mode  = j:GetAttribute("GameMode") or j:GetAttribute("Mode") or mode
+                    local si = j:FindFirstChild("Info") or j:FindFirstChild("ServerInfo")
+                    if si then
+                        mapId = si:GetAttribute("MapId") or si:GetAttribute("Map") or mapId
+                        mode  = si:GetAttribute("GameMode") or si:GetAttribute("Mode") or mode
+                    end
+                end
+
+                for _, v in ipairs(workspace:GetChildren()) do
+                    if v:IsA("StringValue") and (v.Name == "MapId" or v.Name == "Map") then
+                        mapId = v.Value
+                    end
+                    if v:IsA("StringValue") and (v.Name == "GameMode" or v.Name == "Mode") then
+                        mode = v.Value
+                    end
+                end
+            end)
+            if BrzS._srvLabels.map     then BrzS._srvLabels.map.Text     = "[Map] Map: " .. mapId end
+            if BrzS._srvLabels.mode    then BrzS._srvLabels.mode.Text    = "[Fight] Mode: " .. mode end
+            if BrzS._srvLabels.players then BrzS._srvLabels.players.Text = "[Team] Players: " .. #Players:GetPlayers() .. "/" .. Players.MaxPlayers end
+            if BrzS._srvLabels.job     then BrzS._srvLabels.job.Text     = "[Key] Job: " .. game.JobId:sub(1,20) .. "..." end
+            if BrzS._srvLabels.ping    then BrzS._srvLabels.ping.Text    = "[Sig] Ping: " .. math.floor(player:GetNetworkPing() * 1000) .. "ms" end
+        end
+    end
+end)
+
+UserInputService.InputBegan:Connect(function(inp, gp)
+    if gp then return end
+    if inp.KeyCode == Enum.KeyCode.Space then _EHT.bhop = true end
+end)
+UserInputService.InputEnded:Connect(function(inp)
+    if inp.KeyCode == Enum.KeyCode.Space then _EHT.bhop = false end
+end)
+
+RunService.Heartbeat:Connect(function()
+    if not BrzS.bunnyHop then return end
+    if not _EHT.bhop then return end
+    local char = player.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not (hum and hrp) then return end
+    local state = hum:GetState()
+    if state == Enum.HumanoidStateType.Landed or state == Enum.HumanoidStateType.Running then
+        local curVel = hrp.AssemblyLinearVelocity or hrp.Velocity
+        if curVel and curVel.Y <= 1 then
+            local jumpVec = Vector3.new(curVel.X, BrzS.infJumpPower, curVel.Z)
+            pcall(function() hrp.AssemblyLinearVelocity = jumpVec end)
+            pcall(function() hrp.Velocity = jumpVec end)
+            hum:ChangeState(Enum.HumanoidStateType.Jumping)
+        end
+    end
+end)
+
+UserInputService.InputBegan:Connect(function(inp, gp)
+    if gp or inp.KeyCode ~= Enum.KeyCode.Space then return end
+    if not BrzS.longJump then return end
+    _EHT.lj = true
+end)
+UserInputService.InputEnded:Connect(function(inp)
+    if inp.KeyCode ~= Enum.KeyCode.Space then return end
+    if not BrzS.longJump or not _EHT.lj then _EHT.lj = false; return end
+    _EHT.lj = false
+    local char = player.Character
+    local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+    local hum  = char and char:FindFirstChildOfClass("Humanoid")
+    if not hrp or not hum then return end
+    if hum:GetState() == Enum.HumanoidStateType.Jumping
+        or hum:GetState() == Enum.HumanoidStateType.Freefall then
+        local dir = hrp.CFrame.LookVector
+        hrp.Velocity = Vector3.new(
+            dir.X * BrzS.longJumpPower,
+            hrp.Velocity.Y,
+            dir.Z * BrzS.longJumpPower
+        )
+    end
+end)
+
+local _silentConns = {}
+
+local function _silentMuteSound(snd)
+    if not snd or not snd.Parent then return end
+    local v0 = snd.Volume
+    snd.Volume = 0
+    pcall(function() snd:Stop() end)
+
+    local conn = snd:GetPropertyChangedSignal("Volume"):Connect(function()
+        if BrzS.silentSteps and snd.Parent and snd.Volume > 0 then
+            snd.Volume = 0
+            pcall(function() snd:Stop() end)
+        end
+    end)
+    table.insert(_silentConns, {conn = conn, snd = snd, orig = v0})
+end
+
+local function _silentIsFootstep(name)
+    local n = name:lower()
+
+    return n:find("footstep") or n:find("walk") or n:find("run") or n:find("step") or
+           n:find("land") or n:find("sprint") or n:find("jog")
+end
+
+local function _silentApply(char)
+    if not char then return end
+    for _, desc in pairs(char:GetDescendants()) do
+        if desc:IsA("Sound") and _silentIsFootstep(desc.Name) then
+            _silentMuteSound(desc)
+        end
+    end
+
+    char.DescendantAdded:Connect(function(desc)
+        if not BrzS.silentSteps then return end
+        if desc:IsA("Sound") and _silentIsFootstep(desc.Name) then
+            task.defer(function() _silentMuteSound(desc) end)
+        end
+    end)
+end
+
+local function _silentRestore()
+    for _, entry in ipairs(_silentConns) do
+        pcall(function() entry.conn:Disconnect() end)
+        pcall(function()
+            if entry.snd and entry.snd.Parent then
+                entry.snd.Volume = entry.orig or 0.5
+            end
+        end)
+    end
+    _silentConns = {}
+end
+
+BrzS._silentStepsDisable = _silentRestore
+
+local _prevSilentState = false
+RunService.Heartbeat:Connect(function()
+    local cur = BrzS.silentSteps
+    if cur == _prevSilentState then return end
+    _prevSilentState = cur
+    if cur then
+        _silentConns = {}
+        _silentApply(player.Character)
+    else
+        _silentRestore()
+    end
+end)
+
+player.CharacterAdded:Connect(function(char)
+    if BrzS.silentSteps then
+        task.wait(0.5)
+        _silentConns = {}
+        _silentApply(char)
+    end
+end)
+
+-- save original zoom distances before third person ever touches them
+local _tpOrigMaxZoom = nil
+local _tpOrigMinZoom = nil
+
+local _tpFreeMouseConn = nil
+
+local function applyThirdPerson(enabled)
+    -- clean up free-mouse connection when toggling anything
+    if _tpFreeMouseConn then _tpFreeMouseConn:Disconnect(); _tpFreeMouseConn = nil end
+
+    if enabled then
+        -- save originals once
+        if _tpOrigMaxZoom == nil then
+            _tpOrigMaxZoom = pcall(function() return player.CameraMaxZoomDistance end) and player.CameraMaxZoomDistance or 0.5
+            _tpOrigMinZoom = pcall(function() return player.CameraMinZoomDistance end) and player.CameraMinZoomDistance or 0.5
+        end
+
+        player.CameraMode = Enum.CameraMode.Classic
+        pcall(function()
+            player.CameraMaxZoomDistance = BrzS.thirdPersonDist
+            player.CameraMinZoomDistance = 0.5
+        end)
+
+        if BrzS.thirdPersonMode == "free" then
+            -- free mode: camera orbits freely, character does NOT rotate with mouse
+            -- Use Follow so the camera stays behind but mouse controls camera independently
+            pcall(function()
+                player.DevComputerCameraMode = Enum.DevComputerCameraMovementMode.Follow
+            end)
+            -- Unlock mouse from character rotation so you can look around without moving
+            pcall(function()
+                UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+            end)
+            -- Hold unlock each heartbeat since game may re-lock it
+            _tpFreeMouseConn = RunService.Heartbeat:Connect(function()
+                if BrzS.thirdPerson and BrzS.thirdPersonMode == "free" then
+                    pcall(function()
+                        if UserInputService.MouseBehavior ~= Enum.MouseBehavior.Default then
+                            UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+                        end
+                    end)
+                end
+            end)
+        else
+            -- shift mode: classic over-shoulder, mouse locked to character
+            pcall(function()
+                player.DevComputerCameraMode = Enum.DevComputerCameraMovementMode.Classic
+            end)
+        end
+    else
+        -- force zoom to 0 to lock first person, then set mode
+        pcall(function()
+            player.CameraMaxZoomDistance = 0.5
+            player.CameraMinZoomDistance = 0.5
+        end)
+        player.CameraMode = Enum.CameraMode.LockFirstPerson
+        pcall(function()
+            player.DevComputerCameraMode = Enum.DevComputerCameraMovementMode.Default
+            UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+        end)
+        -- restore original zoom after a tick so the game accepts it
+        task.delay(0.1, function()
+            pcall(function()
+                player.CameraMaxZoomDistance = _tpOrigMaxZoom or 0.5
+                player.CameraMinZoomDistance = _tpOrigMinZoom or 0.5
+            end)
+            _tpOrigMaxZoom = nil
+            _tpOrigMinZoom = nil
+        end)
+    end
+end
+
+local _tpTimer = 0
+RunService.Heartbeat:Connect(function(dt)
+    _tpTimer = _tpTimer + dt
+    if _tpTimer < 0.2 then return end
+    _tpTimer = 0
+    if BrzS.thirdPerson then
+        if player.CameraMode ~= Enum.CameraMode.Classic then
+            player.CameraMode = Enum.CameraMode.Classic
+        end
+        pcall(function()
+            if player.CameraMaxZoomDistance ~= BrzS.thirdPersonDist then
+                player.CameraMaxZoomDistance = BrzS.thirdPersonDist
+            end
+        end)
+    else
+        -- keep enforcing first person until restored
+        if player.CameraMode ~= Enum.CameraMode.LockFirstPerson then
+            pcall(function() player.CameraMode = Enum.CameraMode.LockFirstPerson end)
+        end
+    end
+end)
+
+RunService.Heartbeat:Connect(function(dt)
+    if not BrzS.noFallDamage then
+        BrzS._savedHP = nil
+        return
+    end
+    _EHT.fall = _EHT.fall + dt
+    if _EHT.fall < 0.1 then return end
+    _EHT.fall = 0
+    local char = player.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if not hum then return end
+
+    hum:SetAttribute("FallDamageMultiplier", 0)
+    hum:SetAttribute("FallDamage", 0)
+
+    local state = hum:GetState()
+    if state == Enum.HumanoidStateType.Freefall or state == Enum.HumanoidStateType.FallingDown then
+        BrzS._savedHP = hum.Health
+    elseif BrzS._savedHP and hum.Health < _savedHP and state == Enum.HumanoidStateType.Landed then
+
+        hum.Health = BrzS._savedHP
+        BrzS._savedHP = nil
+    elseif state ~= Enum.HumanoidStateType.Landed then
+        BrzS._savedHP = hum.Health
+    end
+end)
+
+task.spawn(function()
+    local rem = ReplicatedStorage:WaitForChild("Remotes", 10)
+    if not rem then return end
+    local fdRE = rem:FindFirstChild("FallDamage") or ReplicatedStorage:FindFirstChild("FallDamage")
+    if fdRE and fdRE:IsA("RemoteEvent") then
+
+        fdRE.OnClientEvent:Connect(function()
+            if not BrzS.noFallDamage then return end
+            local char = player.Character
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            if hum then
+                task.wait()
+                if hum.Health < hum.MaxHealth then
+                    hum.Health = hum.MaxHealth
+                end
+            end
+        end)
+    end
+end)
+
+-- always connect unconditionally so re-opening inventory is always caught
+local function _hookBlur(d, isRepair)
+    if not d:IsA("BlurEffect") then return end
+    if d == Library._uiBlur then return end
+    if BrzS.noInvBlur then
+        task.defer(function() pcall(function() d.Size = 0 end) end)
+    end
+    d:GetPropertyChangedSignal("Size"):Connect(function()
+        if d == Library._uiBlur then return end
+        if BrzS.noInvBlur and d.Size > 0 then
+            pcall(function() d.Size = 0 end)
+        elseif BrzS.noRepairBlur and isRepair and d.Size > 0 then
+            pcall(function() d.Size = 0 end)
+        end
+    end)
+end
+Lighting.DescendantAdded:Connect(function(d) _hookBlur(d, false) end)
+player.PlayerGui.DescendantAdded:Connect(function(d)
+    _hookBlur(d, d:FindFirstAncestor("RepairGui") ~= nil)
+end)
+-- zero all existing blurs every frame when noInvBlur is on
+RunService.Heartbeat:Connect(function()
+    if not BrzS.noInvBlur then return end
+    for _, d in ipairs(Lighting:GetDescendants()) do
+        if d:IsA("BlurEffect") and d ~= Library._uiBlur and d.Size > 0 then
+            pcall(function() d.Size = 0 end)
+        end
+    end
+end)
+
+RunService.Heartbeat:Connect(function()
+    if not BrzS.ambientChanger then return end
+    if BrzS.ambientRGB then
+        BrzS._ambientHue = (BrzS._ambientHue + BrzS.ambientRGBSpeed * 0.01) % 1
+        local c = Color3.fromHSV(BrzS._ambientHue, 0.7, 0.85)
+        Lighting.Ambient = c
+        Lighting.OutdoorAmbient = c
+    else
+        Lighting.Ambient = BrzS.ambientColor
+        Lighting.OutdoorAmbient = BrzS.ambientColor
+    end
+end)
+
+-- ─── No Leaves (tree canopy only — SpawnerZones.Foliage folder) ──────────────
+-- ONLY hides parts inside workspace.SpawnerZones.Foliage.
+-- Never touches players, weapons, clothes, or any regular world geometry.
+removeLeafMeshes = function()
+    local fol = workspace:FindFirstChild("SpawnerZones")
+              and workspace.SpawnerZones:FindFirstChild("Foliage")
+    if not fol then return end
+    for _, v in pairs(fol:GetDescendants()) do
+        -- Only hide if it has a SurfaceAppearance (leaf mesh indicator)
+        -- AND is not a BasePart that could be a trunk (trunks tend to not have SurfaceAppearance)
+        if v:IsA("BasePart") or v:IsA("MeshPart") then
+            if v:FindFirstChildOfClass("SurfaceAppearance") then
+                pcall(function()
+                    v.Transparency = 1
+                    v.CanCollide   = false
+                end)
+            end
+        end
+    end
+end
+
+BrzS.applyNoLeaves = function(enabled)
+    if BrzS._leavesConn    then pcall(function() if task.cancel then task.cancel(BrzS._leavesConn) end end); BrzS._leavesConn    = nil end
+    if BrzS._leavesAddConn then BrzS._leavesAddConn:Disconnect(); BrzS._leavesAddConn = nil end
+
+    if enabled then
+        removeLeafMeshes()
+
+        -- re-apply every 10s to catch foliage that streams in later
+        local function _loopLeaves()
+            while BrzS.noLeaves do
+                task.wait(10)
+                if BrzS.noLeaves then removeLeafMeshes() end
+            end
+        end
+        task.spawn(_loopLeaves)
+
+        -- Only watch NEW objects inside the Foliage folder specifically
+        local fol = workspace:FindFirstChild("SpawnerZones")
+                  and workspace.SpawnerZones:FindFirstChild("Foliage")
+        if fol then
+            BrzS._leavesAddConn = fol.DescendantAdded:Connect(function(obj)
+                if not BrzS.noLeaves then return end
+                if (obj:IsA("BasePart") or obj:IsA("MeshPart"))
+                   and obj:FindFirstChildOfClass("SurfaceAppearance") then
+                    task.defer(function()
+                        pcall(function() obj.Transparency = 1; obj.CanCollide = false end)
+                    end)
+                end
+            end)
+        end
+    else
+        -- restore only the Foliage folder parts
+        local fol = workspace:FindFirstChild("SpawnerZones")
+                  and workspace.SpawnerZones:FindFirstChild("Foliage")
+        if fol then
+            for _, v in pairs(fol:GetDescendants()) do
+                if (v:IsA("BasePart") or v:IsA("MeshPart"))
+                   and v:FindFirstChildOfClass("SurfaceAppearance") then
+                    pcall(function() v.Transparency = 0; v.CanCollide = true end)
+                end
+            end
+        end
+    end
+end
+
+Players.PlayerRemoving:Connect(function(plr)
+    if espDrawings[plr] then
+        removeESPEntry(espDrawings[plr])
+        espDrawings[plr] = nil
+    end
+end)
+
+task.defer(function()
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= player then
+            plr.CharacterAdded:Connect(function()
+                task.wait(0.5)
+                if espS.chams and espDrawings[plr] then
+                    ensureHL(espDrawings[plr], plr.Character, espS.chamsFill, espS.chamsOutline, espS.chamsTransparency)
+                end
+            end)
+        end
+    end
+end)
+
+print('[EH] Exchange.hook v1.3.2 Loaded | Have fun cheating :D')
+
+end)()
+end)()
