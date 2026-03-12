@@ -1,3 +1,19 @@
+-- auto-generated: run last
+local Window    = getgenv().EH_Window
+local Library   = getgenv().EH_Library
+local Utility   = getgenv().EH_Utility
+local EH_Notify = getgenv().EH_Notify
+local MainTab   = getgenv().MainTab
+local RageTab   = getgenv().RageTab
+local VisTab    = getgenv().VisTab
+local MiscTab   = getgenv().MiscTab
+local ExpTab    = getgenv().ExpTab
+local ConfigTab = getgenv().ConfigTab
+local AimSection   = getgenv().AimSection
+local WeapSection  = getgenv().WeapSection
+local ESPHitMark   = getgenv().ESPHitMark
+local ESPKeys      = getgenv().ESPKeys
+
 Window.ToggleAnime(false)
 Window:SwitchTab(MainTab)
 LoadTime = math.floor((tick() - LoadTime) * 1000)
@@ -2327,6 +2343,3 @@ task.defer(function()
 end)
 
 print('[EH] Exchange.hook v1.3.2 Loaded | Have fun cheating :D')
-
-end)()
-end)()
